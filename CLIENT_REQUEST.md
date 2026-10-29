@@ -10,4 +10,4 @@
 >
 > Thanks, Northwind HR
 
-Not started yet.
+Implemented on the `assessment-hardening` branch. See the README for the privacy policy, deletion scope, and test coverage.
