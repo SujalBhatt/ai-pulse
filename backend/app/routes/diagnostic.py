@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from .. import models
 from ..auth import current_membership
-from ..services.questions import questions_for, load_questions
+from ..services.questions import questions_for
 from ..services.scoring import score_open_answer
 
 router = APIRouter(prefix="/diagnostic", tags=["diagnostic"])
@@ -34,22 +34,36 @@ def get_questions(m: models.Membership = Depends(current_membership)):
 
 @router.post("/submit")
 def submit(body: SubmitIn, m: models.Membership = Depends(current_membership), db: Session = Depends(get_db)):
-    bank = {q["id"]: q for q in load_questions()}
+    bank = {q["id"]: q for q in questions_for(m.job_role, m.seniority)}
+    question_ids = [a.question_id for a in body.answers]
+    if not question_ids or len(question_ids) != len(set(question_ids)):
+        raise HTTPException(400, "Each question must be answered exactly once")
+    expected_ids = set(bank)
+    if set(question_ids) != expected_ids:
+        raise HTTPException(400, "Complete all diagnostic questions before submitting")
+
+    responses = []
     for a in body.answers:
         q = bank.get(a.question_id)
         if not q:
             raise HTTPException(400, f"Unknown question {a.question_id}")
-        resp = models.Response(membership_id=m.id, question_id=q["id"], answer=a.answer)
+        answer = a.answer.strip()
+        if not answer:
+            raise HTTPException(400, f"Answer required for {q['id']}")
+        resp = models.Response(membership_id=m.id, question_id=q["id"], answer=answer)
         if q["type"] == "mcq":
-            option = next((o for o in q["options"] if o["text"] == a.answer), None)
+            option = next((o for o in q["options"] if o["text"] == answer), None)
             if option is None:
                 raise HTTPException(400, f"Invalid option for {q['id']}")
             resp.score = option["points"]
         else:
-            result = score_open_answer(q["text"], a.answer)
+            result = score_open_answer(q["text"], answer)
             resp.score = result["score"]
             resp.reason = result["reason"]
             resp.flags = result["flags"]
-        db.add(resp)
+        responses.append(resp)
+
+    db.query(models.Response).filter_by(membership_id=m.id).delete()
+    db.add_all(responses)
     db.commit()
-    return {"saved": len(body.answers)}
+    return {"saved": len(responses)}
