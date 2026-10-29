@@ -49,3 +49,34 @@ def test_small_departments_are_redacted(client):
     assert all(department["redacted"] for department in departments)
     assert all(department["average_score"] is None for department in departments)
     assert response.json()["top_risks"] == []
+
+
+def test_employee_can_delete_own_diagnostic_data(client):
+    headers, _ = login(client, "priya@northwind.test", "Northwind Logistics")
+
+    before = client.get("/reports/me", headers=headers).json()
+    assert before["answered"] > 0
+
+    deleted = client.delete("/reports/me", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] == before["answered"]
+
+    after = client.get("/reports/me", headers=headers)
+    assert after.status_code == 200
+    assert after.json()["answered"] == 0
+    assert after.json()["average_score"] is None
+    assert after.json()["action_plan"] == []
+
+    repeated = client.delete("/reports/me", headers=headers)
+    assert repeated.status_code == 200
+    assert repeated.json()["deleted"] == 0
+
+
+def test_report_includes_personalized_action_plan(client):
+    headers, _ = login(client, "priya@northwind.test", "Northwind Logistics")
+    report = client.get("/reports/me", headers=headers).json()
+    assert report["action_plan"] == [{
+        "priority": "Protect customer data",
+        "action": "Remove customer identifiers before using an AI tool.",
+        "reason": "Your diagnostic included a customer data shared risk.",
+    }]

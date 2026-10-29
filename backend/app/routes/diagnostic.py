@@ -6,7 +6,7 @@ from ..db import get_db
 from .. import models
 from ..auth import current_membership
 from ..services.questions import questions_for
-from ..services.scoring import score_open_answer
+from ..services.scoring import ScoringError, score_open_answer
 
 router = APIRouter(prefix="/diagnostic", tags=["diagnostic"])
 
@@ -57,7 +57,11 @@ def submit(body: SubmitIn, m: models.Membership = Depends(current_membership), d
                 raise HTTPException(400, f"Invalid option for {q['id']}")
             resp.score = option["points"]
         else:
-            result = score_open_answer(q["text"], answer)
+            try:
+                result = score_open_answer(q["text"], answer)
+            except ScoringError as exc:
+                db.rollback()
+                raise HTTPException(502, str(exc)) from exc
             resp.score = result["score"]
             resp.reason = result["reason"]
             resp.flags = result["flags"]
